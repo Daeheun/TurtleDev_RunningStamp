@@ -268,6 +268,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "RunStamp reads Apple Watch running workouts, heart rate, distance, and active energy to generate your running poster.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "RunStamp saves generated running poster images to your photo library.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -311,6 +312,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "RunStamp reads Apple Watch running workouts, heart rate, distance, and active energy to generate your running poster.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "RunStamp saves generated running poster images to your photo library.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
