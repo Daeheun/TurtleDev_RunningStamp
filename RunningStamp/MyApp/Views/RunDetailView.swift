@@ -4,6 +4,9 @@ import UIKit
 struct RunDetailView: View {
     @StateObject private var viewModel: RunDetailViewModel
     @State private var highlightStyle: HighlightStampStyle = .fire
+    @State private var posterFormat: PosterFormat = .feed
+    @State private var posterTemplate: PosterTemplate = .zone
+    @State private var contentHighlight: ContentHighlightTarget?
 
     init(workout: RunWorkoutSummary, healthKitManager: HealthKitManager) {
         _viewModel = StateObject(wrappedValue: RunDetailViewModel(workout: workout, healthKitManager: healthKitManager))
@@ -31,13 +34,16 @@ struct RunDetailView: View {
                     }
 
                     if let report = viewModel.report {
-                        highlightControls
                         posterPreview(report)
+                        if posterTemplate.supportsFormatAndEffect {
+                            highlightControls
+                        }
                         actionButtons
                     }
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 18)
+                .animation(.easeInOut(duration: 0.22), value: posterTemplate)
             }
         }
         .navigationTitle("Run Report")
@@ -150,10 +156,27 @@ struct RunDetailView: View {
 
     private var highlightControls: some View {
         VStack(alignment: .leading, spacing: 14) {
+            highlightSectionTitle("포스터 형식")
+            HStack(spacing: 8) {
+                formatChip(.feed)
+                formatChip(.story)
+            }
+
             highlightSectionTitle("포스터 효과")
             HStack(spacing: 8) {
                 highlightStyleChip(.fire)
                 highlightStyleChip(.clean)
+            }
+
+            HStack(spacing: 6) {
+                highlightSectionTitle("콘텐츠 강조")
+                proBadge
+            }
+            HStack(spacing: 8) {
+                contentHighlightChip(nil)
+                ForEach(ContentHighlightTarget.allCases) { target in
+                    contentHighlightChip(target)
+                }
             }
         }
         .padding(14)
@@ -166,6 +189,72 @@ struct RunDetailView: View {
         Text(title)
             .font(.system(size: 14, weight: .black))
             .foregroundStyle(RunStampColors.primaryText.opacity(0.88))
+    }
+
+    private var proBadge: some View {
+        Text("PRO")
+            .font(.system(size: 10, weight: .black, design: .rounded))
+            .foregroundStyle(RunStampColors.appBackground)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                LinearGradient(
+                    colors: [RunStampColors.warmYellow, RunStampColors.energyOrange],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .clipShape(Capsule())
+    }
+
+    private func contentHighlightChip(_ target: ContentHighlightTarget?) -> some View {
+        let isSelected = contentHighlight == target
+        return Button {
+            guard ProFeatureGate.isUnlocked || target == nil else {
+                viewModel.exportMessage = ProFeatureGate.lockedMessage
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                contentHighlight = target
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if target != nil {
+                    Image(systemName: ProFeatureGate.isUnlocked ? "flame.fill" : "lock.fill")
+                        .font(.system(size: 10, weight: .black))
+                }
+                Text(target?.displayText ?? "없음")
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+            }
+            .foregroundStyle(isSelected ? RunStampColors.appBackground : RunStampColors.primaryText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(isSelected ? RunStampColors.energyOrange : RunStampColors.surface)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(isSelected ? .clear : RunStampColors.cardStroke.opacity(0.65), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func formatChip(_ format: PosterFormat) -> some View {
+        let isSelected = posterFormat == format
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                posterFormat = format
+            }
+        } label: {
+            Text(format.displayText)
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .foregroundStyle(isSelected ? RunStampColors.appBackground : RunStampColors.primaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(isSelected ? RunStampColors.limeGreen : RunStampColors.surface)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(isSelected ? .clear : RunStampColors.cardStroke.opacity(0.65), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private func highlightStyleChip(_ style: HighlightStampStyle) -> some View {
@@ -209,9 +298,21 @@ struct RunDetailView: View {
                     .minimumScaleFactor(0.7)
             }
 
-            ScaledZoneRunPosterPreview(report: report, highlightStamp: selectedHighlightStamp(for: report))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .shadow(color: .black.opacity(0.36), radius: 24, y: 10)
+            TabView(selection: $posterTemplate) {
+                ForEach(PosterTemplate.allCases) { template in
+                    templatePage(template, report: report)
+                        .tag(template)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: previewHeight)
+            .animation(.easeInOut(duration: 0.22), value: posterFormat)
+
+            HStack(spacing: 8) {
+                ForEach(PosterTemplate.allCases) { template in
+                    templateChip(template)
+                }
+            }
         }
         .padding(12)
         .background(RunStampColors.elevatedSurface.opacity(0.92))
@@ -219,16 +320,103 @@ struct RunDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(RunStampColors.cardStroke.opacity(0.45), lineWidth: 1))
     }
 
-    private var actionButtons: some View {
-        HStack(spacing: 12) {
-            reportActionButton(title: "이미지로 저장", systemImage: "square.and.arrow.down", isPrimary: true) {
-                viewModel.exportPoster(highlightStamp: currentHighlightStamp)
-            }
-
-            reportActionButton(title: "인스타 공유", systemImage: "square.and.arrow.up", isPrimary: false) {
-                viewModel.prepareShareImage(highlightStamp: currentHighlightStamp)
+    @ViewBuilder
+    private func templatePage(_ template: PosterTemplate, report: RunningPosterReport) -> some View {
+        Group {
+            switch template {
+            case .zone:
+                ScaledCanvasPreview(canvasSize: posterFormat.canvasSize) {
+                    switch posterFormat {
+                    case .feed:
+                        ZoneRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight)
+                    case .story:
+                        StoryRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight)
+                    }
+                }
+            case .receipt:
+                ScaledCanvasPreview(canvasSize: ImageRendererService.storySize) {
+                    RunningReceiptView(workout: viewModel.workout)
+                }
+            case .route:
+                ScaledCanvasPreview(canvasSize: ImageRendererService.storySize) {
+                    RoutePosterView(workout: viewModel.workout)
+                }
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.36), radius: 24, y: 10)
+    }
+
+    private var previewHeight: CGFloat {
+        let availableWidth = max(UIScreen.main.bounds.width - 60, 300)
+        let canvas = posterTemplate.canvasSize(format: posterFormat)
+        return availableWidth * canvas.height / canvas.width
+    }
+
+    private func templateChip(_ template: PosterTemplate) -> some View {
+        let isSelected = posterTemplate == template
+        return Button {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                posterTemplate = template
+            }
+        } label: {
+            Text(template.displayText)
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .foregroundStyle(isSelected ? RunStampColors.appBackground : RunStampColors.primaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(isSelected ? RunStampColors.limeGreen : RunStampColors.surface)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(isSelected ? .clear : RunStampColors.cardStroke.opacity(0.65), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var actionButtons: some View {
+        VStack(spacing: 12) {
+            instagramStoryButton
+
+            HStack(spacing: 12) {
+                reportActionButton(title: "이미지로 저장", systemImage: "square.and.arrow.down", isPrimary: true) {
+                    viewModel.exportPoster(template: posterTemplate, format: posterFormat, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight)
+                }
+
+                reportActionButton(title: "공유하기", systemImage: "square.and.arrow.up", isPrimary: false) {
+                    viewModel.prepareShareImage(template: posterTemplate, format: posterFormat, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight)
+                }
+            }
+        }
+    }
+
+    private var instagramStoryButton: some View {
+        Button {
+            viewModel.shareToInstagramStories(template: posterTemplate, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "camera.circle.fill")
+                    .font(.system(size: 19, weight: .black))
+                Text("인스타 스토리로 공유")
+                    .font(.system(size: 15, weight: .black))
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .foregroundStyle(.white)
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.51, green: 0.23, blue: 0.86),
+                        Color(red: 0.91, green: 0.18, blue: 0.44),
+                        Color(red: 0.99, green: 0.55, blue: 0.24)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func reportActionButton(title: String, systemImage: String, isPrimary: Bool, action: @escaping () -> Void) -> some View {
@@ -266,29 +454,23 @@ struct RunDetailView: View {
     }
 }
 
-private struct ScaledZoneRunPosterPreview: View {
-    let report: RunningPosterReport
-    let highlightStamp: HighlightStamp
+private struct ScaledCanvasPreview<Content: View>: View {
+    let canvasSize: CGSize
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
         GeometryReader { proxy in
-            let width = proxy.size.width
-            let scale = width / ZoneRunPosterView.canvasSize.width
+            let scale = proxy.size.width / canvasSize.width
 
-            ZoneRunPosterView(report: report, highlightStamp: highlightStamp)
+            content()
+                .frame(width: canvasSize.width, height: canvasSize.height)
                 .scaleEffect(scale, anchor: .topLeading)
                 .frame(
-                    width: ZoneRunPosterView.canvasSize.width * scale,
-                    height: ZoneRunPosterView.canvasSize.height * scale,
+                    width: canvasSize.width * scale,
+                    height: canvasSize.height * scale,
                     alignment: .topLeading
                 )
         }
-        .frame(height: previewHeight)
-    }
-
-    private var previewHeight: CGFloat {
-        let availableWidth = max(UIScreen.main.bounds.width - 60, 300)
-        return availableWidth * ZoneRunPosterView.canvasSize.height / ZoneRunPosterView.canvasSize.width
     }
 }
 

@@ -7,6 +7,7 @@ struct ZoneRunPosterView: View {
     let report: RunningPosterReport
     var languageMode: PosterLanguageMode = .mixed
     var highlightStamp: HighlightStamp = .clean
+    var contentHighlight: ContentHighlightTarget?
 
     private var signatureAccent: Color {
         effortColor(report.effortSignature.title)
@@ -128,10 +129,10 @@ struct ZoneRunPosterView: View {
             }
 
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(112), spacing: 10), count: 4), spacing: 10) {
-                PosterStatTile(icon: "clock.fill", label: "시간", value: report.durationText, tint: RunStampColors.electricBlue)
-                PosterStatTile(icon: "gauge.with.dots.needle.67percent", label: "평균 페이스", value: paceDisplayText, tint: RunStampColors.vibrantPurple)
-                PosterStatTile(icon: "heart.fill", label: "평균 심박", value: report.avgHRText, suffix: "bpm", tint: RunStampColors.redlineRed)
-                PosterStatTile(icon: "flame.fill", label: "칼로리", value: report.caloriesText, suffix: "kcal", tint: RunStampColors.energyOrange)
+                PosterStatTile(icon: "clock.fill", label: "시간", value: report.durationText, tint: RunStampColors.electricBlue, isFlameHighlighted: contentHighlight == .duration)
+                PosterStatTile(icon: "gauge.with.dots.needle.67percent", label: "평균 페이스", value: paceDisplayText, tint: RunStampColors.vibrantPurple, isFlameHighlighted: contentHighlight == .pace)
+                PosterStatTile(icon: "heart.fill", label: "평균 심박", value: report.avgHRText, suffix: "bpm", tint: RunStampColors.redlineRed, isFlameHighlighted: contentHighlight == .heartRate)
+                PosterStatTile(icon: "flame.fill", label: "칼로리", value: report.caloriesText, suffix: "kcal", tint: RunStampColors.energyOrange, isFlameHighlighted: contentHighlight == .calories)
             }
 
             Spacer(minLength: 0)
@@ -225,6 +226,7 @@ private struct PosterStatTile: View {
     let value: String
     var suffix: String?
     let tint: Color
+    var isFlameHighlighted: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -254,9 +256,11 @@ private struct PosterStatTile: View {
         }
         .padding(14)
         .frame(width: 112, height: 126, alignment: .leading)
-        .background(tint.opacity(0.10))
+        .background(tint.opacity(isFlameHighlighted ? 0.18 : 0.10))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(tint.opacity(0.24), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(isFlameHighlighted ? RunStampColors.energyOrange.opacity(0.55) : tint.opacity(0.24), lineWidth: isFlameHighlighted ? 1.6 : 1))
+        .flameContentHighlight(isFlameHighlighted)
+        .zIndex(isFlameHighlighted ? 10 : 0)
     }
 }
 
@@ -603,7 +607,7 @@ private struct PulseBadge: View {
     }
 }
 
-private struct IndoorEffortVisualizerView: View {
+struct IndoorEffortVisualizerView: View {
     let report: RunningPosterReport
     let accent: Color
 
@@ -709,7 +713,7 @@ private struct IndoorMetricTile: View {
     }
 }
 
-private struct EffortWaveChart: View {
+struct EffortWaveChart: View {
     let report: RunningPosterReport
     let accent: Color
     let showConsoleGrid: Bool
@@ -823,7 +827,7 @@ private struct EffortWaveChart: View {
     }
 }
 
-private struct NeonRouteMapView: View {
+struct NeonRouteMapView: View {
     let locations: [CLLocation]
     let accent: Color
     let highlightStamp: HighlightStamp
