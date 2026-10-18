@@ -1,11 +1,25 @@
 import Foundation
 
 struct HeartRateZoneAnalyzer {
-    var age: Int = 35
+    /// 존 경계 계산의 기준 최대 심박수. 사용자 설정(직접 입력 또는 220 − 나이)에서 주입한다.
+    var maxHeartRate: Double
+    /// 거리·페이스·속도 텍스트에 사용할 단위.
+    var distanceUnit: DistanceUnit
     var zoneBoundaries: [HeartRateZoneBoundary] = HeartRateZoneAnalyzer.defaultZoneBoundaries
     var maxSampleGap: TimeInterval = 120
     var fallbackLastSampleInterval: TimeInterval = 30
     private let effortSignatureAnalyzer = EffortSignatureAnalyzer()
+
+    /// 심박 데이터가 없는 러닝의 시그니처 타이틀.
+    static let lightRunTitle = "FREE RUN"
+
+    init(
+        maxHeartRate: Double = Double(UserProfileStore.fallbackMaxHeartRate),
+        distanceUnit: DistanceUnit = .kilometers
+    ) {
+        self.maxHeartRate = maxHeartRate
+        self.distanceUnit = distanceUnit
+    }
 
     static let defaultZoneBoundaries: [HeartRateZoneBoundary] = [
         HeartRateZoneBoundary(id: 1, name: "Zone 1", minRatio: 0.50, maxRatio: 0.60),
@@ -16,7 +30,7 @@ struct HeartRateZoneAnalyzer {
     ]
 
     var estimatedMaxHeartRate: Double {
-        Double(220 - age)
+        maxHeartRate
     }
 
     func makeReport(for workout: RunWorkoutSummary, heartRateSamples: [HeartRateSamplePoint]) -> RunningPosterReport? {
@@ -43,12 +57,14 @@ struct HeartRateZoneAnalyzer {
 
         let dominantZone = zoneResults.max { $0.percentage < $1.percentage }
         return RunningPosterReport(
+            distanceUnitText: distanceUnit.lowercaseSymbol,
+            paceUnitText: distanceUnit.lowercasePaceSuffix,
             title: title,
             subtitle: posterSubtitle(for: effortSignature, title: title),
             dateText: RunFormatters.posterDate(workout.startDate),
-            distanceText: RunFormatters.distanceNumberKm(workout.distanceInMeters),
+            distanceText: RunFormatters.distanceNumber(workout.distanceInMeters, unit: distanceUnit),
             durationText: RunFormatters.duration(workout.duration),
-            avgPaceText: RunFormatters.paceCompact(workout.averagePaceSecondsPerKm),
+            avgPaceText: RunFormatters.paceCompact(workout.averagePaceSecondsPerKm, unit: distanceUnit),
             avgHRText: RunFormatters.number(avgHeartRate),
             maxHRText: RunFormatters.number(maxHeartRate),
             caloriesText: RunFormatters.number(workout.activeCalories),
@@ -61,10 +77,51 @@ struct HeartRateZoneAnalyzer {
             effortSignature: effortSignature,
             routeLocations: workout.routeLocations,
             isIndoorRunning: workout.isIndoorRunning,
-            avgSpeedText: averageSpeedText(distanceMeters: workout.distanceInMeters, duration: workout.duration),
+            avgSpeedText: RunFormatters.speed(distanceMeters: workout.distanceInMeters, duration: workout.duration, unit: distanceUnit),
             paceConsistencyText: nil,
             hrDriftText: heartRateDriftText(samples: cleanedSamples, startDate: workout.startDate, endDate: workout.endDate),
             dominantZoneText: dominantZone.map { "Z\($0.zone) \(Int($0.percentage.rounded()))%" } ?? "--"
+        )
+    }
+
+    /// 심박 샘플이 없는 러닝용 리포트. 존 분석·시그니처 없이 거리·시간·페이스·경로만 담는다.
+    /// 가짜 샘플 데이터 대신 이 리포트로 "라이트 포스터"를 렌더링한다.
+    func makeLightReport(for workout: RunWorkoutSummary) -> RunningPosterReport {
+        let signature = EffortSignature(
+            title: Self.lightRunTitle,
+            subtitle: "Distance only",
+            emoji: "👟",
+            primaryMetricText: "",
+            secondaryMetricText: "",
+            recoveryNeed: .medium,
+            koreanInsight: "심박 데이터 없이 기록된 러닝입니다. 거리와 페이스 중심으로 정리했어요."
+        )
+
+        return RunningPosterReport(
+            hasHeartRateData: false,
+            distanceUnitText: distanceUnit.lowercaseSymbol,
+            paceUnitText: distanceUnit.lowercasePaceSuffix,
+            title: Self.lightRunTitle,
+            subtitle: "DISTANCE ONLY",
+            dateText: RunFormatters.posterDate(workout.startDate),
+            distanceText: RunFormatters.distanceNumber(workout.distanceInMeters, unit: distanceUnit),
+            durationText: RunFormatters.duration(workout.duration),
+            avgPaceText: RunFormatters.paceCompact(workout.averagePaceSecondsPerKm, unit: distanceUnit),
+            avgHRText: "--",
+            maxHRText: "--",
+            caloriesText: RunFormatters.number(workout.activeCalories),
+            zoneResults: [],
+            zone2Percentage: 0,
+            runType: Self.lightRunTitle,
+            insightText: signature.koreanInsight,
+            heartRateTimeline: [],
+            effortSignature: signature,
+            routeLocations: workout.routeLocations,
+            isIndoorRunning: workout.isIndoorRunning,
+            avgSpeedText: RunFormatters.speed(distanceMeters: workout.distanceInMeters, duration: workout.duration, unit: distanceUnit),
+            paceConsistencyText: nil,
+            hrDriftText: "-- BPM",
+            dominantZoneText: "--"
         )
     }
 
@@ -123,12 +180,6 @@ struct HeartRateZoneAnalyzer {
     func averageHeartRate(from samples: [HeartRateSamplePoint]) -> Double? {
         guard !samples.isEmpty else { return nil }
         return samples.map(\.bpm).reduce(0, +) / Double(samples.count)
-    }
-
-    private func averageSpeedText(distanceMeters: Double, duration: TimeInterval) -> String {
-        let hours = duration / 3_600
-        guard distanceMeters > 0, hours > 0 else { return "-- KM/H" }
-        return String(format: "%.1f KM/H", distanceMeters / 1_000 / hours)
     }
 
     private func heartRateDriftText(samples: [HeartRateSamplePoint], startDate: Date, endDate: Date) -> String {
@@ -207,6 +258,8 @@ struct HeartRateZoneAnalyzer {
         return RunningPosterReport(
             id: report.id,
             isSampleData: true,
+            distanceUnitText: report.distanceUnitText,
+            paceUnitText: report.paceUnitText,
             title: report.title,
             subtitle: report.subtitle,
             dateText: report.dateText,

@@ -67,13 +67,13 @@ final class HealthKitManager {
         var title: String {
             switch self {
             case .notRequested:
-                return "Not Connected"
+                return AppStrings.Health.notConnected
             case .unavailable:
-                return "HealthKit Unavailable"
+                return AppStrings.Health.unavailable
             case .authorized:
-                return "Connected"
+                return AppStrings.Health.connected
             case .denied:
-                return "Permission Needed"
+                return AppStrings.Health.permissionNeeded
             }
         }
     }
@@ -91,7 +91,7 @@ final class HealthKitManager {
         }
 
         guard Bundle.main.object(forInfoDictionaryKey: "NSHealthShareUsageDescription") != nil else {
-            return .denied("NSHealthShareUsageDescription is missing from the app Info.plist. Add it to the RunStamp target before requesting Apple Health permission.")
+            return .denied(AppStrings.Health.usageDescriptionMissing)
         }
 
         do {
@@ -151,11 +151,28 @@ final class HealthKitManager {
         return updatedSummary
     }
 
+    /// Apple Health 생년월일 기준 만 나이. 미입력·권한 거부·비정상 값이면 nil.
+    func fetchAge() async -> Int? {
+        guard isHealthDataAvailable,
+              let components = try? healthStore.dateOfBirthComponents(),
+              let birthDate = Calendar.current.date(from: components),
+              let age = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year,
+              (10...100).contains(age) else {
+            return nil
+        }
+        return age
+    }
+
     private func healthKitReadTypes() -> Set<HKObjectType> {
         var types: Set<HKObjectType> = [
             HKObjectType.workoutType(),
             HKSeriesType.workoutRoute()
         ]
+
+        // 생년월일은 심박 존 기준(최대 심박 = 220 − 나이) 계산에 쓰인다.
+        if let dateOfBirth = HKObjectType.characteristicType(forIdentifier: .dateOfBirth) {
+            types.insert(dateOfBirth)
+        }
 
         let identifiers: [HKQuantityTypeIdentifier] = [
             .distanceWalkingRunning,
@@ -389,9 +406,9 @@ enum HealthKitError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .healthDataUnavailable:
-            return "HealthKit is not available on this device."
+            return AppStrings.Health.dataUnavailable
         case .workoutUnavailable:
-            return "The selected workout is no longer available. Reload recent runs and try again."
+            return AppStrings.Health.workoutUnavailable
         }
     }
 }

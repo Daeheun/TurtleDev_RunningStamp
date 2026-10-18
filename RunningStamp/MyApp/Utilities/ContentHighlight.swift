@@ -48,8 +48,8 @@ enum ProFeatureGate {
         #endif
     }
 
-    static let lockedMessage = "콘텐츠 강조는 PRO 기능입니다. 업그레이드 후 이용할 수 있습니다."
-    static let layoutLockedMessage = "포스터 레이아웃 커스텀은 PRO 기능입니다. 업그레이드 후 이용할 수 있습니다."
+    static var lockedMessage: String { AppStrings.Pro.contentHighlightLocked }
+    static var layoutLockedMessage: String { AppStrings.Pro.layoutLocked }
 }
 
 /// 선택한 콘텐츠 주위에 불꽃(FireCorner 에셋) 장식과 열기 글로우를 두른다.

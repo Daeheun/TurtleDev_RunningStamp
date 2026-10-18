@@ -5,6 +5,7 @@ struct WorkoutPickerView: View {
     let isLoading: Bool
     let message: String?
     let healthKitManager: HealthKitManager
+    @ObservedObject var signatureCache: RunSignatureCache
     let selectedTransitionID: UUID?
     let reload: () -> Void
     let onSelect: (RunWorkoutSummary) -> Void
@@ -52,6 +53,8 @@ struct WorkoutPickerView: View {
                             workout: workout,
                             index: index,
                             healthKitManager: healthKitManager,
+                            signatureCache: signatureCache,
+                            signature: signatureCache.signature(for: workout),
                             isTransitioning: isSelected,
                             isDimmed: isDimmed
                         )
@@ -225,12 +228,13 @@ private struct MonthSelectorView: View {
 
 private struct MonthlyRunningSummaryCard: View {
     let workouts: [RunWorkoutSummary]
+    @Environment(\.distanceUnit) private var distanceUnit
 
     var body: some View {
         HStack(spacing: 0) {
             SummaryMetricView(icon: "shoeprints.fill", value: "\(workouts.count)", label: "총 세션", color: RunStampColors.electricBlue)
             divider
-            SummaryMetricView(icon: "mappin.circle.fill", value: RunFormatters.summaryDistanceKm(totalDistance), label: "총 거리 (KM)", color: RunStampColors.vibrantPurple)
+            SummaryMetricView(icon: "mappin.circle.fill", value: RunFormatters.summaryDistanceNumber(totalDistance, unit: distanceUnit), label: "총 거리 (\(distanceUnit.symbol))", color: RunStampColors.vibrantPurple)
             divider
             SummaryMetricView(icon: "flame.fill", value: RunFormatters.number(totalCalories), label: "총 칼로리 (KCAL)", color: RunStampColors.energyOrange)
             divider

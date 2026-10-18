@@ -88,9 +88,10 @@
 				};
 			};
 			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "RunningStamp" */;
-			developmentRegion = en;
+			developmentRegion = ko;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				ko,
 				en,
 				Base,
 			);
@@ -269,8 +270,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "RunStamp reads Apple Watch running workouts, heart rate, distance, and active energy to generate your running poster.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "RunStamp saves generated running poster images to your photo library.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "RunStamp은 Apple Watch 러닝 운동, 심박수, 거리, 활동 칼로리, 운동 경로, 생년월일(최대 심박 계산)을 읽어 러닝 포스터를 만듭니다. 데이터는 기기 밖으로 전송되지 않습니다.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "생성한 러닝 포스터 이미지를 사진 보관함에 저장하기 위해 필요합니다.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -313,8 +314,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "RunStamp reads Apple Watch running workouts, heart rate, distance, and active energy to generate your running poster.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "RunStamp saves generated running poster images to your photo library.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "RunStamp은 Apple Watch 러닝 운동, 심박수, 거리, 활동 칼로리, 운동 경로, 생년월일(최대 심박 계산)을 읽어 러닝 포스터를 만듭니다. 데이터는 기기 밖으로 전송되지 않습니다.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "생성한 러닝 포스터 이미지를 사진 보관함에 저장하기 위해 필요합니다.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

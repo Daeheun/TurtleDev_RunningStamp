@@ -5,12 +5,21 @@ import UIKit
 @MainActor
 final class RunningPosterViewModel: ObservableObject {
     let healthKitManager = HealthKitManager()
+    /// 홈 리스트 행의 러닝 타입을 상세 화면과 같은 분석기로 계산하는 캐시.
+    let signatureCache: RunSignatureCache
 
     @Published var permissionState: HealthKitManager.PermissionState = .notRequested
     @Published var workouts: [RunWorkoutSummary] = []
     @Published var isRequestingPermission = false
     @Published var isLoadingRuns = false
     @Published var message: String?
+
+    init() {
+        signatureCache = RunSignatureCache(
+            healthKitManager: healthKitManager,
+            maxHeartRate: UserProfileStore.shared.resolvedMaxHeartRate
+        )
+    }
 
     var isBusy: Bool {
         isRequestingPermission || isLoadingRuns
@@ -34,11 +43,17 @@ final class RunningPosterViewModel: ObservableObject {
         permissionState = await healthKitManager.requestAuthorization()
         switch permissionState {
         case .authorized:
-            message = "Apple Health에서 최근 러닝 운동을 불러올 수 있습니다."
+            message = AppStrings.Health.authorized
+            Analytics.shared.track(.healthAuthorization(result: "granted"))
+            // 생년월일 → 나이 → 최대 심박(220 − 나이)로 존 기준을 개인화한다.
+            await UserProfileStore.shared.refreshHealthAge(using: healthKitManager)
+            signatureCache.updateMaxHeartRate(UserProfileStore.shared.resolvedMaxHeartRate)
         case .unavailable:
-            message = "이 기기에서는 HealthKit을 사용할 수 없습니다."
+            message = AppStrings.Health.dataUnavailable
+            Analytics.shared.track(.healthAuthorization(result: "unavailable"))
         case .denied(let reason):
             message = reason
+            Analytics.shared.track(.healthAuthorization(result: "denied"))
         case .notRequested:
             message = nil
         }
@@ -55,8 +70,10 @@ final class RunningPosterViewModel: ObservableObject {
                 workouts = summaries
             }
 
+            Analytics.shared.track(.runsLoaded(count: summaries.count))
+
             if summaries.isEmpty {
-                message = "최근 Apple Watch 러닝 기록을 찾지 못했습니다."
+                message = AppStrings.Health.noRecentRuns
             } else {
                 await hydrateRoutes(for: summaries)
             }
@@ -90,11 +107,17 @@ final class RunDetailViewModel: ObservableObject {
     @Published var shareImage: UIImage?
 
     private let healthKitManager: HealthKitManager
-    private let analyzer = HeartRateZoneAnalyzer()
+    private let analyzer: HeartRateZoneAnalyzer
 
     init(workout: RunWorkoutSummary, healthKitManager: HealthKitManager) {
         self.workout = workout
         self.healthKitManager = healthKitManager
+        // 리스트(RunSignatureCache)와 같은 최대 심박 기준을 써야 러닝 타입이 일치한다.
+        let profile = UserProfileStore.shared
+        self.analyzer = HeartRateZoneAnalyzer(
+            maxHeartRate: profile.resolvedMaxHeartRate,
+            distanceUnit: profile.distanceUnit
+        )
     }
 
     func loadReport() async {
@@ -109,12 +132,12 @@ final class RunDetailViewModel: ObservableObject {
             reportWorkout = try await healthKitManager.summaryWithRoute(for: workout)
             workout = reportWorkout
             if reportWorkout.isIndoorRunning {
-                routeMessage = "실내 러닝이라 GPS 경로 대신 실내 Effort Wave를 표시합니다."
+                routeMessage = AppStrings.Report.indoorRoute
             } else if reportWorkout.routeLocations.isEmpty {
-                routeMessage = "경로 데이터가 없어 포스터에는 Effort Wave를 표시합니다."
+                routeMessage = AppStrings.Report.noRoute
             }
         } catch {
-            routeMessage = "경로 데이터는 불러오지 못했지만 심박 분석은 계속합니다."
+            routeMessage = AppStrings.Report.routeLoadFailed
         }
 
         do {
@@ -123,42 +146,56 @@ final class RunDetailViewModel: ObservableObject {
             if let realReport = analyzer.makeReport(for: reportWorkout, heartRateSamples: samples) {
                 report = realReport
                 let routeCount = reportWorkout.routeLocations.count
-                let routeText = routeCount > 0 ? " 경로 좌표 \(routeCount)개를 반영했습니다." : " \(routeMessage ?? "")"
-                statusMessage = "실제 HealthKit 심박 샘플 \(samples.count)개를 분석했습니다." + routeText
+                let routeText = routeCount > 0 ? AppStrings.Report.routeCoordinates(routeCount) : (routeMessage ?? "")
+                statusMessage = [AppStrings.Report.analyzedSamples(samples.count), routeText].filter { !$0.isEmpty }.joined(separator: " ")
             } else {
-                report = analyzer.sampleReport()
-                statusMessage = "선택한 운동 시간 범위에서 사용 가능한 심박 샘플이 0개입니다. Apple Health 권한에서 심박수 접근이 허용되어 있는지 확인해 주세요."
+                // 심박 샘플이 없으면 가짜 샘플 대신 실제 거리·페이스만 담은 라이트 포스터를 만든다.
+                report = analyzer.makeLightReport(for: reportWorkout)
+                statusMessage = AppStrings.Report.lightPosterNoSamples
             }
         } catch {
-            report = analyzer.sampleReport()
-            statusMessage = "심박 데이터를 불러오지 못해 Sample Data Mode로 표시합니다. \(error.localizedDescription)"
+            report = analyzer.makeLightReport(for: reportWorkout)
+            statusMessage = AppStrings.Report.lightPosterAfterError(error.localizedDescription)
         }
+
+        if let report {
+            Analytics.shared.track(.runOpened(hasHeartRate: report.hasHeartRateData, isIndoor: reportWorkout.isIndoorRunning))
+        }
+    }
+
+    /// PRO 잠금 안내를 띄우고 어떤 기능에서 막혔는지 기록한다(페이월 설계용 신호).
+    func showProLocked(_ message: String, feature: String) {
+        exportMessage = message
+        Analytics.shared.track(.proFeatureLocked(feature: feature))
     }
 
     func exportPoster(format: PosterFormat = .feed, highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil, layout: PosterLayout = .default) {
         guard let report else {
-            exportMessage = "아직 생성된 포스터가 없습니다."
+            exportMessage = AppStrings.Export.noPoster
             return
         }
 
         guard let image = PosterExportHelper.renderPoster(report: report, format: format, highlightStamp: highlightStamp, contentHighlight: contentHighlight, layout: layout) else {
-            exportMessage = "포스터 이미지를 생성하지 못했습니다."
+            exportMessage = AppStrings.Export.renderFailed
             return
         }
 
         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-        exportMessage = "포스터 이미지를 사진 보관함에 저장했습니다."
+        exportMessage = AppStrings.Export.saved
+        Analytics.shared.track(.posterSaved(format: format, hasHeartRate: report.hasHeartRateData))
     }
 
     func prepareShareImage(format: PosterFormat = .feed, highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil, layout: PosterLayout = .default) {
         guard let report else {
-            exportMessage = "아직 생성된 포스터가 없습니다."
+            exportMessage = AppStrings.Export.noPoster
             return
         }
 
         shareImage = PosterExportHelper.renderPoster(report: report, format: format, highlightStamp: highlightStamp, contentHighlight: contentHighlight, layout: layout)
         if shareImage == nil {
-            exportMessage = "공유할 포스터 이미지를 생성하지 못했습니다."
+            exportMessage = AppStrings.Export.shareRenderFailed
+        } else {
+            Analytics.shared.track(.posterShared(format: format, hasHeartRate: report.hasHeartRateData))
         }
     }
 
@@ -166,16 +203,17 @@ final class RunDetailViewModel: ObservableObject {
     /// 인스타그램이 없거나 열기에 실패하면 시스템 공유 시트로 대체한다.
     func shareToInstagramStories(highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil, layout: PosterLayout = .default) {
         guard let report else {
-            exportMessage = "아직 생성된 포스터가 없습니다."
+            exportMessage = AppStrings.Export.noPoster
             return
         }
 
         guard let image = PosterExportHelper.renderPoster(report: report, format: .story, highlightStamp: highlightStamp, contentHighlight: contentHighlight, layout: layout) else {
-            exportMessage = "공유할 포스터 이미지를 생성하지 못했습니다."
+            exportMessage = AppStrings.Export.shareRenderFailed
             return
         }
 
         InstagramStoryService.shareToStories(backgroundImage: image) { [weak self] success in
+            Analytics.shared.track(.instagramStoryShare(opened: success))
             guard let self, !success else { return }
             self.shareImage = image
         }

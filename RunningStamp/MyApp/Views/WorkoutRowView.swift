@@ -12,9 +12,13 @@ struct WorkoutRowView: View {
     let workout: RunWorkoutSummary
     var index: Int = 0
     let healthKitManager: HealthKitManager?
+    /// 러닝 타입 계산용 캐시. 값(`signature`)은 부모가 관찰해 넘겨주고, 이 행은 로드만 트리거한다.
+    let signatureCache: RunSignatureCache?
+    let signature: RunSignatureCache.QuickSignature?
     let isTransitioning: Bool
     let isDimmed: Bool
 
+    @Environment(\.distanceUnit) private var distanceUnit
     @State private var displayedWorkout: RunWorkoutSummary
     @State private var routeState: RouteState
 
@@ -22,12 +26,16 @@ struct WorkoutRowView: View {
         workout: RunWorkoutSummary,
         index: Int = 0,
         healthKitManager: HealthKitManager? = nil,
+        signatureCache: RunSignatureCache? = nil,
+        signature: RunSignatureCache.QuickSignature? = nil,
         isTransitioning: Bool = false,
         isDimmed: Bool = false
     ) {
         self.workout = workout
         self.index = index
         self.healthKitManager = healthKitManager
+        self.signatureCache = signatureCache
+        self.signature = signature
         self.isTransitioning = isTransitioning
         self.isDimmed = isDimmed
         _displayedWorkout = State(initialValue: workout)
@@ -53,13 +61,13 @@ struct WorkoutRowView: View {
                 }
 
                 HStack(alignment: .lastTextBaseline, spacing: 5) {
-                    CountUpDistanceText(meters: displayedWorkout.distanceInMeters, isCounting: isTransitioning)
+                    CountUpDistanceText(meters: displayedWorkout.distanceInMeters, unit: distanceUnit, isCounting: isTransitioning)
                         .font(.system(size: 35, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(RunStampColors.primaryText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.65)
-                    Text("KM")
+                    Text(distanceUnit.symbol)
                         .font(.system(size: 15, weight: .black, design: .rounded))
                         .foregroundStyle(RunStampColors.secondaryText)
                 }
@@ -72,7 +80,7 @@ struct WorkoutRowView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 MetricLine(icon: "clock", text: RunFormatters.duration(displayedWorkout.duration))
-                MetricLine(icon: "speedometer", text: RunFormatters.pace(displayedWorkout.averagePaceSecondsPerKm))
+                MetricLine(icon: "speedometer", text: RunFormatters.pace(displayedWorkout.averagePaceSecondsPerKm, unit: distanceUnit))
             }
             .frame(width: 84, alignment: .leading)
 
@@ -108,7 +116,10 @@ struct WorkoutRowView: View {
         .animation(.easeInOut(duration: 0.22), value: isTransitioning)
         .animation(.easeInOut(duration: 0.18), value: isDimmed)
         .task(id: workout.id) {
-            await loadRouteIfNeeded()
+            // 경로와 러닝 타입을 동시에 불러온다. 둘 다 실패해도 행은 기본 상태로 표시된다.
+            async let route: Void = loadRouteIfNeeded()
+            async let signatureLoad: Void = signatureCache?.load(for: workout) ?? ()
+            _ = await (route, signatureLoad)
         }
         .onChange(of: workout.routeLocations.count) { _, _ in
             displayedWorkout = workout
@@ -138,43 +149,13 @@ struct WorkoutRowView: View {
         }
     }
 
+    /// 상세 포스터와 같은 분석기(RunSignatureCache)가 계산한 러닝 타입. 계산 전에는 자리표시자.
     private var estimatedEffortTitle: String {
-        guard let averageHeartRate = displayedWorkout.averageHeartRate else {
-            return displayedWorkout.isIndoorRunning ? "MIXED MILES" : "EFFORT WAVE"
-        }
-
-        let estimatedMaxHeartRate = 185.0
-        let ratio = averageHeartRate / estimatedMaxHeartRate
-        switch ratio {
-        case ..<0.62:
-            return "RECOVERY FLOW"
-        case ..<0.72:
-            return "CONTROLLED BASE"
-        case ..<0.80:
-            return "STEADY BUILDER"
-        case ..<0.90:
-            return "TEMPO ENGINE"
-        default:
-            return "REDLINE PUSH"
-        }
+        signature?.title ?? "···"
     }
 
     private var estimatedDominantZoneText: String? {
-        guard let averageHeartRate = displayedWorkout.averageHeartRate else { return nil }
-        let estimatedMaxHeartRate = 185.0
-        let ratio = averageHeartRate / estimatedMaxHeartRate
-        switch ratio {
-        case ..<0.60:
-            return "Z1-Z2"
-        case ..<0.70:
-            return "Z2"
-        case ..<0.80:
-            return "Z3"
-        case ..<0.90:
-            return "Z3-Z4"
-        default:
-            return "Z4-Z5"
-        }
+        signature?.dominantZoneText
     }
 
     private func loadRouteIfNeeded() async {
@@ -249,13 +230,14 @@ private extension EnvironmentValues {
 
 private struct CountUpDistanceText: View {
     let meters: Double
+    let unit: DistanceUnit
     let isCounting: Bool
     @State private var countStartDate = Date()
 
     var body: some View {
         TimelineView(.animation) { timeline in
             let value = isCounting ? animatedMeters(at: timeline.date) : meters
-            Text(RunFormatters.listDistanceNumberKm(value))
+            Text(RunFormatters.distanceNumber(value, unit: unit))
         }
         .onChange(of: isCounting) { _, counting in
             if counting {

@@ -18,14 +18,20 @@ final class AutoPosterService: NSObject, ObservableObject, UNUserNotificationCen
     /// 알림을 탭해 열어야 할 러닝의 HealthKit UUID. HomeView가 관찰해 딥링크한다.
     @Published var pendingWorkoutID: UUID?
 
+    /// 현재 러닝 종료 감시·알림이 켜져 있는지. 설정 화면의 토글이 관찰한다.
+    @Published private(set) var isEnabled: Bool
+
     private let healthStore = HKHealthStore()
     private var observerQuery: HKObserverQuery?
 
     private static let enabledKey = "auto_poster_enabled"
+    /// 사용자가 설정에서 명시적으로 끈 상태. 켜기 전까지 자동 활성화하지 않는다.
+    private static let userDisabledKey = "auto_poster_user_disabled"
     private static let lastEndDateKey = "auto_poster_last_notified_end_date"
     private static let workoutIDKey = "workoutID"
 
     private override init() {
+        isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         super.init()
     }
 
@@ -39,20 +45,45 @@ final class AutoPosterService: NSObject, ObservableObject, UNUserNotificationCen
         }
     }
 
-    /// HealthKit 권한 획득 직후 호출한다. 최초 1회 알림 권한을 요청하고
-    /// 백그라운드 전달 + 옵저버를 등록한다. 이미 활성화됐다면 감시만 재개한다.
+    /// HealthKit 권한 획득 직후 호출한다. 사용자가 설정에서 끄지 않았다면
+    /// 최초 1회 알림 권한을 요청하고 백그라운드 전달 + 옵저버를 등록한다.
     func enableIfNeeded() async {
         guard HKHealthStore.isHealthDataAvailable() else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.userDisabledKey) else { return }
+        await activate()
+    }
 
+    /// 설정 화면 토글. 끄면 옵저버와 백그라운드 전달을 해제하고, 다시 켜면
+    /// 꺼져 있던 동안의 러닝에 소급 알림이 가지 않도록 기준 시각을 지금으로 맞춘다.
+    func setEnabled(_ enabled: Bool) async {
+        let defaults = UserDefaults.standard
+        if enabled {
+            defaults.set(false, forKey: Self.userDisabledKey)
+            defaults.set(Date().timeIntervalSince1970, forKey: Self.lastEndDateKey)
+            await activate()
+        } else {
+            defaults.set(true, forKey: Self.userDisabledKey)
+            defaults.set(false, forKey: Self.enabledKey)
+            stopObserving()
+            try? await healthStore.disableBackgroundDelivery(for: .workoutType())
+            isEnabled = false
+        }
+    }
+
+    private func activate() async {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.enabledKey) else {
             startObserving()
+            isEnabled = true
             return
         }
 
         let granted = (try? await UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-        guard granted else { return }
+        guard granted else {
+            isEnabled = false
+            return
+        }
 
         // 과거 러닝에 대한 소급 알림을 막기 위해 기준 시각을 지금으로 잡는다.
         if defaults.object(forKey: Self.lastEndDateKey) == nil {
@@ -66,6 +97,13 @@ final class AutoPosterService: NSObject, ObservableObject, UNUserNotificationCen
             // 백그라운드 전달 등록에 실패해도 앱 실행 중 감시는 계속 동작한다.
         }
         startObserving()
+        isEnabled = true
+    }
+
+    private func stopObserving() {
+        guard let observerQuery else { return }
+        healthStore.stop(observerQuery)
+        self.observerQuery = nil
     }
 
     private func startObserving() {
@@ -98,12 +136,13 @@ final class AutoPosterService: NSObject, ObservableObject, UNUserNotificationCen
 
         defaults.set(workout.endDate.timeIntervalSince1970, forKey: Self.lastEndDateKey)
 
-        let kilometers = (workout.totalDistance?.doubleValue(for: .meter()) ?? 0) / 1_000
+        let meters = workout.totalDistance?.doubleValue(for: .meter()) ?? 0
+        let unit = DistanceUnit.current
         let content = UNMutableNotificationContent()
-        content.title = "오늘의 러닝 포스터가 준비됐어요 🔥"
-        content.body = kilometers > 0
-            ? String(format: "%.2fkm 완주! 탭해서 포스터를 확인하고 공유해 보세요.", kilometers)
-            : "탭해서 포스터를 확인하고 공유해 보세요."
+        content.title = AppStrings.Notification.posterReadyTitle
+        content.body = meters > 0
+            ? AppStrings.Notification.posterReadyBody(distanceText: "\(RunFormatters.distanceNumber(meters, unit: unit))\(unit.lowercaseSymbol)")
+            : AppStrings.Notification.posterReadyBodyFallback
         content.sound = .default
         content.userInfo = [Self.workoutIDKey: workout.uuid.uuidString]
 
@@ -112,7 +151,12 @@ final class AutoPosterService: NSObject, ObservableObject, UNUserNotificationCen
             content: content,
             trigger: nil
         )
-        try? await UNUserNotificationCenter.current().add(request)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            Analytics.shared.track(.posterNotification(action: "scheduled"))
+        } catch {
+            // 알림 예약 실패는 조용히 무시한다. 다음 러닝에서 다시 시도된다.
+        }
     }
 
     private func fetchLatestRun(endingAfter date: Date) async -> HKWorkout? {
@@ -154,5 +198,6 @@ final class AutoPosterService: NSObject, ObservableObject, UNUserNotificationCen
             return
         }
         pendingWorkoutID = id
+        Analytics.shared.track(.posterNotification(action: "tapped"))
     }
 }

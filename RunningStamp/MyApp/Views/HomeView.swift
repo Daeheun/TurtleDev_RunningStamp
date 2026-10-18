@@ -1,12 +1,17 @@
 import SwiftUI
 
 struct HomeView: View {
+    /// 온보딩에서 연결을 미룬 경우 false. 사용자가 카드의 버튼을 눌러야 권한을 요청한다.
+    var autoRequestsHealthAccess = true
+
     @StateObject private var viewModel = RunningPosterViewModel()
     @ObservedObject private var autoPoster = AutoPosterService.shared
+    @ObservedObject private var profile = UserProfileStore.shared
     @State private var navigationPath: [RunWorkoutSummary] = []
     @State private var selectedTransitionID: UUID?
     @State private var didStartAutoLoad = false
     @State private var didReloadForPendingWorkout = false
+    @State private var isSettingsPresented = false
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -40,6 +45,7 @@ struct HomeView: View {
                                 isLoading: viewModel.isLoadingRuns,
                                 message: viewModel.message,
                                 healthKitManager: viewModel.healthKitManager,
+                                signatureCache: viewModel.signatureCache,
                                 selectedTransitionID: selectedTransitionID,
                                 reload: { Task { await viewModel.loadRecentRuns() } },
                                 onSelect: startReportTransition
@@ -53,11 +59,31 @@ struct HomeView: View {
             .navigationTitle("RunStamp")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isSettingsPresented = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(RunStampColors.secondaryText)
+                    }
+                    .accessibilityLabel("설정")
+                }
+            }
+            .sheet(isPresented: $isSettingsPresented) {
+                SettingsView()
+            }
             .navigationDestination(for: RunWorkoutSummary.self) { workout in
                 RunDetailView(workout: workout, healthKitManager: viewModel.healthKitManager)
             }
+            .environment(\.distanceUnit, profile.distanceUnit)
             .task {
                 await autoLoadRunsIfNeeded()
+            }
+            .onChange(of: profile.resolvedMaxHeartRate) { _, maxHeartRate in
+                // 설정에서 최대 심박을 바꾸면 리스트의 러닝 타입을 새 기준으로 다시 계산한다.
+                viewModel.signatureCache.updateMaxHeartRate(maxHeartRate)
             }
             .onChange(of: autoPoster.pendingWorkoutID) { _, _ in
                 openPendingWorkoutIfPossible()
@@ -71,6 +97,7 @@ struct HomeView: View {
     private func autoLoadRunsIfNeeded() async {
         guard !didStartAutoLoad else { return }
         didStartAutoLoad = true
+        guard autoRequestsHealthAccess else { return }
         await viewModel.requestAuthorizationAndLoadRuns()
 
         // HealthKit 연동에 성공하면 러닝 종료 감지 + 포스터 준비 알림을 활성화한다.

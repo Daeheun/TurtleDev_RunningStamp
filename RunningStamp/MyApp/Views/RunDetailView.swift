@@ -10,6 +10,7 @@ struct RunDetailView: View {
     @State private var isLayoutEditorPresented = false
     @State private var isPresetSavePromptPresented = false
     @State private var presetNameDraft = ""
+    @Environment(\.distanceUnit) private var distanceUnit
     #if DEBUG
     /// DEBUG 전용: PRO 잠금 상태를 실기기에서 재빌드 없이 전환하기 위한 토글.
     @AppStorage(ProFeatureGate.unlockedDefaultsKey) private var proUnlockedDebug = ProFeatureGate.defaultUnlocked
@@ -42,7 +43,11 @@ struct RunDetailView: View {
 
                     if let report = viewModel.report {
                         posterPreview(report)
-                        highlightControls
+                        if report.hasHeartRateData {
+                            highlightControls
+                        } else {
+                            lightPosterControls
+                        }
                         actionButtons
                     }
                 }
@@ -50,14 +55,14 @@ struct RunDetailView: View {
                 .padding(.vertical, 18)
             }
         }
-        .navigationTitle("Run Report")
+        .navigationTitle("러닝 리포트")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .task {
             await viewModel.loadReport()
         }
-        .alert("Export", isPresented: exportAlertBinding) {
-            Button("OK", role: .cancel) { viewModel.exportMessage = nil }
+        .alert("알림", isPresented: exportAlertBinding) {
+            Button("확인", role: .cancel) { viewModel.exportMessage = nil }
         } message: {
             Text(viewModel.exportMessage ?? "")
         }
@@ -65,7 +70,7 @@ struct RunDetailView: View {
             TextField("프리셋 이름", text: $presetNameDraft)
             Button("저장") {
                 if !layoutStore.savePreset(named: presetNameDraft, for: posterFormat) {
-                    viewModel.exportMessage = "프리셋은 형식별로 최대 \(PosterLayoutStore.maxPresetCount)개까지 저장할 수 있습니다."
+                    viewModel.exportMessage = AppStrings.Export.presetLimit(PosterLayoutStore.maxPresetCount)
                 }
                 presetNameDraft = ""
             }
@@ -123,12 +128,12 @@ struct RunDetailView: View {
                 .lineLimit(1)
 
                 HStack(alignment: .lastTextBaseline, spacing: 6) {
-                    Text(RunFormatters.listDistanceNumberKm(viewModel.workout.distanceInMeters))
+                    Text(RunFormatters.distanceNumber(viewModel.workout.distanceInMeters, unit: distanceUnit))
                         .font(.system(size: 54, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.46)
-                    Text("KM")
+                    Text(distanceUnit.symbol)
                         .font(.system(size: 16, weight: .black, design: .rounded))
                         .foregroundStyle(RunStampColors.secondaryText)
                         .padding(.bottom, 8)
@@ -136,7 +141,7 @@ struct RunDetailView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text("\(RunFormatters.duration(viewModel.workout.duration)) · \(RunFormatters.pace(viewModel.workout.averagePaceSecondsPerKm))")
+                Text("\(RunFormatters.duration(viewModel.workout.duration)) · \(RunFormatters.pace(viewModel.workout.averagePaceSecondsPerKm, unit: distanceUnit))")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.62))
                     .lineLimit(1)
@@ -150,7 +155,7 @@ struct RunDetailView: View {
                     .foregroundStyle(.white.opacity(0.50))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Text(viewModel.workout.routeLocations.count >= 2 ? "ROUTE READY" : "ROUTE CHECK")
+                Text(viewModel.workout.routeLocations.count >= 2 ? "GPS 경로" : "경로 없음")
                     .font(.system(size: 11, weight: .black, design: .monospaced))
                     .foregroundStyle(Color(red: 0.70, green: 0.96, blue: 0.08).opacity(0.86))
                     .lineLimit(1)
@@ -240,6 +245,40 @@ struct RunDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 24).stroke(RunStampColors.cardStroke.opacity(0.45), lineWidth: 1))
     }
 
+    /// 심박 데이터가 없는 러닝: 강조·레이아웃 대신 형식 선택과 안내만 보여준다.
+    private var lightPosterControls: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            highlightSectionTitle("포스터 형식")
+            HStack(spacing: 8) {
+                formatChip(.feed)
+                formatChip(.story)
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "heart.slash.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(RunStampColors.electricBlue)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("심박 데이터가 없는 러닝입니다")
+                        .font(.system(size: 13, weight: .black))
+                        .foregroundStyle(RunStampColors.primaryText.opacity(0.88))
+                    Text("거리·시간·페이스 중심의 라이트 포스터로 만들었습니다. Apple Watch로 기록한 러닝은 심박 존 분석과 러닝 타입이 포함된 포스터가 생성됩니다.")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(RunStampColors.secondaryText)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RunStampColors.electricBlue.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .padding(14)
+        .background(RunStampColors.elevatedSurface.opacity(0.90))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(RunStampColors.cardStroke.opacity(0.45), lineWidth: 1))
+    }
+
     private func highlightSectionTitle(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 14, weight: .black))
@@ -266,7 +305,7 @@ struct RunDetailView: View {
     private var layoutEditButton: some View {
         Button {
             guard ProFeatureGate.isUnlocked else {
-                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                viewModel.showProLocked(ProFeatureGate.layoutLockedMessage, feature: "layout")
                 return
             }
             isLayoutEditorPresented = true
@@ -311,11 +350,11 @@ struct RunDetailView: View {
     private func savePresetChip(currentLayout: PosterLayout) -> some View {
         Button {
             guard ProFeatureGate.isUnlocked else {
-                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                viewModel.showProLocked(ProFeatureGate.layoutLockedMessage, feature: "layout")
                 return
             }
             guard !currentLayout.isDefault else {
-                viewModel.exportMessage = "기본 배치 상태입니다. 먼저 레이아웃을 편집한 뒤 프리셋으로 저장해 주세요."
+                viewModel.exportMessage = AppStrings.Export.defaultLayoutFirst
                 return
             }
             presetNameDraft = ""
@@ -343,7 +382,7 @@ struct RunDetailView: View {
     private func defaultLayoutChip(isActive: Bool) -> some View {
         Button {
             guard ProFeatureGate.isUnlocked else {
-                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                viewModel.showProLocked(ProFeatureGate.layoutLockedMessage, feature: "layout")
                 return
             }
             withAnimation(.easeInOut(duration: 0.18)) {
@@ -358,7 +397,7 @@ struct RunDetailView: View {
     private func presetChip(_ preset: PosterLayoutPreset, isActive: Bool) -> some View {
         Button {
             guard ProFeatureGate.isUnlocked else {
-                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                viewModel.showProLocked(ProFeatureGate.layoutLockedMessage, feature: "layout")
                 return
             }
             withAnimation(.easeInOut(duration: 0.18)) {
@@ -420,7 +459,7 @@ struct RunDetailView: View {
         let isSelected = contentHighlight == target
         return Button {
             guard ProFeatureGate.isUnlocked || target == nil else {
-                viewModel.exportMessage = ProFeatureGate.lockedMessage
+                viewModel.showProLocked(ProFeatureGate.lockedMessage, feature: "content_highlight")
                 return
             }
             withAnimation(.easeInOut(duration: 0.18)) {
@@ -473,7 +512,7 @@ struct RunDetailView: View {
                 highlightStyle = style
             }
         } label: {
-            Text(style == .fire ? "Fire" : "Clean")
+            Text(style == .fire ? "불꽃" : "클린")
                 .font(.system(size: 13, weight: .black, design: .rounded))
                 .foregroundStyle(isSelected ? RunStampColors.appBackground : RunStampColors.primaryText)
                 .frame(maxWidth: .infinity)
@@ -496,8 +535,8 @@ struct RunDetailView: View {
     private func posterPreview(_ report: RunningPosterReport) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("REPORT PREVIEW")
-                    .font(.system(size: 13, weight: .black, design: .monospaced))
+                Text("포스터 미리보기")
+                    .font(.system(size: 13, weight: .black))
                     .foregroundStyle(RunStampColors.secondaryText.opacity(0.78))
                 Spacer()
                 Text(report.effortSignature.title)
@@ -508,11 +547,15 @@ struct RunDetailView: View {
             }
 
             ScaledCanvasPreview(canvasSize: posterFormat.canvasSize) {
-                switch posterFormat {
-                case .feed:
-                    ZoneRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight, layout: activeLayout(for: .feed))
-                case .story:
-                    StoryRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight, layout: activeLayout(for: .story))
+                if !report.hasHeartRateData {
+                    LightRunPosterView(report: report, format: posterFormat)
+                } else {
+                    switch posterFormat {
+                    case .feed:
+                        ZoneRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight, layout: activeLayout(for: .feed))
+                    case .story:
+                        StoryRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight, layout: activeLayout(for: .story))
+                    }
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -611,26 +654,6 @@ struct RunDetailView: View {
                 if value == nil { viewModel.shareImage = nil }
             }
         )
-    }
-}
-
-private struct ScaledCanvasPreview<Content: View>: View {
-    let canvasSize: CGSize
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        GeometryReader { proxy in
-            let scale = proxy.size.width / canvasSize.width
-
-            content()
-                .frame(width: canvasSize.width, height: canvasSize.height)
-                .scaleEffect(scale, anchor: .topLeading)
-                .frame(
-                    width: canvasSize.width * scale,
-                    height: canvasSize.height * scale,
-                    alignment: .topLeading
-                )
-        }
     }
 }
 

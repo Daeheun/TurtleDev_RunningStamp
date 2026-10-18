@@ -164,7 +164,7 @@ struct StoryRunPosterView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                     .shadow(color: isFireMode ? RunStampColors.redlineRed.opacity(0.34) : .clear, radius: 20)
-                Text("km")
+                Text(report.distanceUnitText)
                     .font(.system(size: 40, weight: .black, design: .monospaced))
                     .foregroundStyle(RunStampColors.secondaryText.opacity(0.86))
                     .padding(.bottom, 26)
@@ -183,7 +183,7 @@ struct StoryRunPosterView: View {
 
     private var paceDisplayText: String {
         guard !report.avgPaceText.contains("--") else { return "--'--\"" }
-        return "\(report.avgPaceText)/km"
+        return "\(report.avgPaceText)\(report.paceUnitText)"
     }
 
     private func storyStatTile(icon: String, label: String, value: String, suffix: String? = nil, tint: Color, isFlameHighlighted: Bool = false) -> some View {

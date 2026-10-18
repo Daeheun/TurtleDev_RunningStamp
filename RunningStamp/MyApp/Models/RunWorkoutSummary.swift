@@ -65,6 +65,11 @@ struct EffortSignature {
 struct RunningPosterReport: Identifiable {
     let id: UUID
     let isSampleData: Bool
+    /// false면 심박 샘플이 없는 러닝이라 존 분석 없이 거리·페이스 중심의 라이트 포스터로 렌더링한다.
+    let hasHeartRateData: Bool
+    /// 포스터에 표시할 거리 단위 기호("km"/"mi")와 페이스 접미사("/km"/"/mi").
+    let distanceUnitText: String
+    let paceUnitText: String
     let title: String
     let subtitle: String
     let dateText: String
@@ -95,6 +100,9 @@ struct RunningPosterReport: Identifiable {
     init(
         id: UUID = UUID(),
         isSampleData: Bool = false,
+        hasHeartRateData: Bool = true,
+        distanceUnitText: String = "km",
+        paceUnitText: String = "/km",
         title: String,
         subtitle: String,
         dateText: String,
@@ -120,6 +128,9 @@ struct RunningPosterReport: Identifiable {
     ) {
         self.id = id
         self.isSampleData = isSampleData
+        self.hasHeartRateData = hasHeartRateData
+        self.distanceUnitText = distanceUnitText
+        self.paceUnitText = paceUnitText
         self.title = title
         self.subtitle = subtitle
         self.dateText = dateText
