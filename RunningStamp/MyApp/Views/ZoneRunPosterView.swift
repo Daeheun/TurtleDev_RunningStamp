@@ -8,6 +8,8 @@ struct ZoneRunPosterView: View {
     var languageMode: PosterLanguageMode = .mixed
     var highlightStamp: HighlightStamp = .clean
     var contentHighlight: ContentHighlightTarget?
+    /// PRO: 섹션 커스텀 배치. 기본값이면 기존 렌더링과 동일하다.
+    var layout: PosterLayout = .default
 
     private var signatureAccent: Color {
         effortColor(report.effortSignature.title)
@@ -29,41 +31,47 @@ struct ZoneRunPosterView: View {
         ZStack {
             PosterBackground(accent: posterAccent)
 
-            VStack(alignment: .leading, spacing: 16) {
-                topBar
-
-                HStack(alignment: .top, spacing: 20) {
-                    heroSummary
-                        .frame(width: 500, height: 480, alignment: .topLeading)
-
-                    primaryVisual
-                        .frame(width: 520, height: 480)
+            // 섹션은 저장된 순서대로 플로우 레이아웃이 자동 배치한다.
+            // 이동·숨김·크기 변경 시 나머지 섹션이 iOS 홈 화면처럼 재배치된다.
+            PosterFlowLayout(spacing: 16) {
+                ForEach(layout.visibleSections(for: .feed)) { section in
+                    feedSection(section)
+                        .posterSection(section, layout: layout, format: .feed)
                 }
-
-                HStack(spacing: 12) {
-                    PosterPanel(accent: posterAccent) {
-                        HeartRateZonesCard(report: report, accent: posterAccent, highlightStamp: resolvedHighlight)
-                    }
-                    .frame(width: 514, height: 360)
-
-                    PosterPanel(accent: posterAccent) {
-                        HeartRateTimelineCard(report: report, accent: posterAccent, highlightStamp: resolvedHighlight)
-                    }
-                    .frame(width: 514, height: 360)
-                }
-
-                PosterPanel(accent: posterAccent, opacity: 0.15) {
-                    EffortSignatureWideCard(signature: report.effortSignature, accent: posterAccent, highlightStamp: resolvedHighlight)
-                }
-                .frame(height: 310)
-
-                footer
             }
             .padding(20)
         }
         .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
         .foregroundStyle(RunStampColors.primaryText)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func feedSection(_ section: PosterSection) -> some View {
+        switch section {
+        case .topBar:
+            topBar
+        case .hero:
+            heroSummary
+        case .visual:
+            primaryVisual
+        case .zones:
+            PosterPanel(accent: posterAccent) {
+                HeartRateZonesCard(report: report, accent: posterAccent, highlightStamp: resolvedHighlight)
+            }
+        case .timeline:
+            PosterPanel(accent: posterAccent) {
+                HeartRateTimelineCard(report: report, accent: posterAccent, highlightStamp: resolvedHighlight)
+            }
+        case .signature:
+            PosterPanel(accent: posterAccent, opacity: 0.15) {
+                EffortSignatureWideCard(signature: report.effortSignature, accent: posterAccent, highlightStamp: resolvedHighlight)
+            }
+        case .footer:
+            footer
+        default:
+            EmptyView()
+        }
     }
 
     private var topBar: some View {
@@ -94,11 +102,12 @@ struct ZoneRunPosterView: View {
                     .foregroundStyle(posterAccent)
 
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
+                    // 2줄이 되면 섹션 고정 높이(480)를 넘어 아래 카드와 겹치므로 1줄 축소로 고정한다.
                     Text(report.effortSignature.title)
                         .font(.system(size: 64, weight: .black, design: .rounded))
                         .italic()
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.58)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.40)
                     if isFireMode {
                         Image(systemName: "flame.fill")
                             .font(.system(size: 42, weight: .black))
@@ -278,16 +287,18 @@ private struct HeartRateZonesCard: View {
                 SectionTitle("심박 존 분석", accent: RunStampColors.primaryText.opacity(0.84))
             }
 
-            HStack(spacing: 24) {
+            // 도넛 + 범례 합이 카드 내용폭(464)을 넘지 않도록 도넛을 줄이고
+            // 존 라벨을 유동폭으로 바꿔 우측 % 컬럼이 잘리지 않게 한다.
+            HStack(spacing: 20) {
                 DonutChart(results: report.zoneResults)
-                    .frame(width: 230, height: 230)
+                    .frame(width: 200, height: 200)
                     .overlay {
                         VStack(spacing: 4) {
                             Text("\(Int((report.dominantZone?.percentage ?? report.zone2Percentage).rounded()))%")
-                                .font(.system(size: 52, weight: .black, design: .rounded))
+                                .font(.system(size: 44, weight: .black, design: .rounded))
                                 .monospacedDigit()
                             Text(PosterTextFormatter.dominantZoneKoreanText(zone: report.dominantZone?.zone ?? 2))
-                                .font(.system(size: 16, weight: .heavy))
+                                .font(.system(size: 15, weight: .heavy))
                                 .foregroundStyle(zoneColor(report.dominantZone?.zone ?? 2))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.70)
@@ -296,20 +307,19 @@ private struct HeartRateZonesCard: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(report.zoneResults) { result in
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             Circle()
                                 .fill(zoneColor(result.zone))
                                 .frame(width: 14, height: 14)
                             Text(PosterTextFormatter.zoneShortLabel(zone: result.zone))
                                 .foregroundStyle(result.zone == report.dominantZone?.zone ? zoneColor(result.zone) : RunStampColors.secondaryText.opacity(0.82))
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.70)
-                                .frame(width: 100, alignment: .leading)
+                                .minimumScaleFactor(0.60)
                             Spacer(minLength: 4)
                             Text(RunFormatters.duration(result.duration))
                                 .foregroundStyle(.white.opacity(0.86))
                                 .monospacedDigit()
-                                .frame(width: 70, alignment: .trailing)
+                                .frame(width: 64, alignment: .trailing)
                             Text("\(Int(result.percentage.rounded()))%")
                                 .foregroundStyle(result.zone == report.dominantZone?.zone ? zoneColor(result.zone) : .white.opacity(0.48))
                                 .monospacedDigit()
@@ -318,6 +328,7 @@ private struct HeartRateZonesCard: View {
                         .font(.system(size: 15, weight: .black, design: .rounded))
                     }
                 }
+                .frame(maxWidth: .infinity)
             }
         }
     }

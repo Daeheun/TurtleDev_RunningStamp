@@ -135,13 +135,13 @@ final class RunDetailViewModel: ObservableObject {
         }
     }
 
-    func exportPoster(template: PosterTemplate = .zone, format: PosterFormat = .feed, highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil) {
+    func exportPoster(format: PosterFormat = .feed, highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil, layout: PosterLayout = .default) {
         guard let report else {
             exportMessage = "아직 생성된 포스터가 없습니다."
             return
         }
 
-        guard let image = PosterExportHelper.renderPoster(template: template, report: report, workout: workout, format: format, highlightStamp: highlightStamp, contentHighlight: contentHighlight) else {
+        guard let image = PosterExportHelper.renderPoster(report: report, format: format, highlightStamp: highlightStamp, contentHighlight: contentHighlight, layout: layout) else {
             exportMessage = "포스터 이미지를 생성하지 못했습니다."
             return
         }
@@ -150,13 +150,13 @@ final class RunDetailViewModel: ObservableObject {
         exportMessage = "포스터 이미지를 사진 보관함에 저장했습니다."
     }
 
-    func prepareShareImage(template: PosterTemplate = .zone, format: PosterFormat = .feed, highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil) {
+    func prepareShareImage(format: PosterFormat = .feed, highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil, layout: PosterLayout = .default) {
         guard let report else {
             exportMessage = "아직 생성된 포스터가 없습니다."
             return
         }
 
-        shareImage = PosterExportHelper.renderPoster(template: template, report: report, workout: workout, format: format, highlightStamp: highlightStamp, contentHighlight: contentHighlight)
+        shareImage = PosterExportHelper.renderPoster(report: report, format: format, highlightStamp: highlightStamp, contentHighlight: contentHighlight, layout: layout)
         if shareImage == nil {
             exportMessage = "공유할 포스터 이미지를 생성하지 못했습니다."
         }
@@ -164,13 +164,13 @@ final class RunDetailViewModel: ObservableObject {
 
     /// 스토리(9:16) 포스터를 렌더링해 인스타그램 스토리로 바로 공유한다.
     /// 인스타그램이 없거나 열기에 실패하면 시스템 공유 시트로 대체한다.
-    func shareToInstagramStories(template: PosterTemplate = .zone, highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil) {
+    func shareToInstagramStories(highlightStamp: HighlightStamp = .clean, contentHighlight: ContentHighlightTarget? = nil, layout: PosterLayout = .default) {
         guard let report else {
             exportMessage = "아직 생성된 포스터가 없습니다."
             return
         }
 
-        guard let image = PosterExportHelper.renderPoster(template: template, report: report, workout: workout, format: .story, highlightStamp: highlightStamp, contentHighlight: contentHighlight) else {
+        guard let image = PosterExportHelper.renderPoster(report: report, format: .story, highlightStamp: highlightStamp, contentHighlight: contentHighlight, layout: layout) else {
             exportMessage = "공유할 포스터 이미지를 생성하지 못했습니다."
             return
         }

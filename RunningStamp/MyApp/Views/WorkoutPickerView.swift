@@ -37,6 +37,10 @@ struct WorkoutPickerView: View {
                     .opacity(selectedTransitionID == nil ? 1 : 0.28)
                     .transition(.opacity.combined(with: .move(edge: .top)))
 
+                MonthlyCalendarHeatmapView(monthDate: selectedSection.date, workouts: selectedSection.workouts)
+                    .opacity(selectedTransitionID == nil ? 1 : 0.28)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+
                 ForEach(Array(selectedSection.workouts.enumerated()), id: \.element.id) { index, workout in
                     let isSelected = selectedTransitionID == workout.id
                     let isDimmed = selectedTransitionID != nil && !isSelected

@@ -3,10 +3,17 @@ import UIKit
 
 struct RunDetailView: View {
     @StateObject private var viewModel: RunDetailViewModel
+    @StateObject private var layoutStore = PosterLayoutStore()
     @State private var highlightStyle: HighlightStampStyle = .fire
     @State private var posterFormat: PosterFormat = .feed
-    @State private var posterTemplate: PosterTemplate = .zone
     @State private var contentHighlight: ContentHighlightTarget?
+    @State private var isLayoutEditorPresented = false
+    @State private var isPresetSavePromptPresented = false
+    @State private var presetNameDraft = ""
+    #if DEBUG
+    /// DEBUG 전용: PRO 잠금 상태를 실기기에서 재빌드 없이 전환하기 위한 토글.
+    @AppStorage(ProFeatureGate.unlockedDefaultsKey) private var proUnlockedDebug = ProFeatureGate.defaultUnlocked
+    #endif
 
     init(workout: RunWorkoutSummary, healthKitManager: HealthKitManager) {
         _viewModel = StateObject(wrappedValue: RunDetailViewModel(workout: workout, healthKitManager: healthKitManager))
@@ -35,15 +42,12 @@ struct RunDetailView: View {
 
                     if let report = viewModel.report {
                         posterPreview(report)
-                        if posterTemplate.supportsFormatAndEffect {
-                            highlightControls
-                        }
+                        highlightControls
                         actionButtons
                     }
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 18)
-                .animation(.easeInOut(duration: 0.22), value: posterTemplate)
             }
         }
         .navigationTitle("Run Report")
@@ -57,9 +61,39 @@ struct RunDetailView: View {
         } message: {
             Text(viewModel.exportMessage ?? "")
         }
+        .alert("레이아웃 프리셋 저장", isPresented: $isPresetSavePromptPresented) {
+            TextField("프리셋 이름", text: $presetNameDraft)
+            Button("저장") {
+                if !layoutStore.savePreset(named: presetNameDraft, for: posterFormat) {
+                    viewModel.exportMessage = "프리셋은 형식별로 최대 \(PosterLayoutStore.maxPresetCount)개까지 저장할 수 있습니다."
+                }
+                presetNameDraft = ""
+            }
+            Button("취소", role: .cancel) { presetNameDraft = "" }
+        } message: {
+            Text("현재 \(posterFormat.displayText) 배치를 프리셋으로 저장합니다.")
+        }
         .sheet(item: shareImageBinding) { image in
             ActivityView(activityItems: [image.image])
         }
+        .sheet(isPresented: $isLayoutEditorPresented) {
+            if let report = viewModel.report {
+                PosterLayoutEditorView(
+                    format: posterFormat,
+                    report: report,
+                    highlightStamp: selectedHighlightStamp(for: report),
+                    contentHighlight: contentHighlight,
+                    initialLayout: layoutStore.layout(for: posterFormat),
+                    onSave: { layoutStore.setLayout($0, for: posterFormat) }
+                )
+            }
+        }
+    }
+
+    /// PRO 잠금 상태에서는 저장된 커스텀 배치를 무시하고 기본 배치로 렌더링한다.
+    /// (저장값은 보존되므로 다시 언락하면 커스텀이 복원된다.)
+    private func activeLayout(for format: PosterFormat) -> PosterLayout {
+        ProFeatureGate.isUnlocked ? layoutStore.layout(for: format) : .default
     }
 
     private var headerCard: some View {
@@ -178,6 +212,27 @@ struct RunDetailView: View {
                     contentHighlightChip(target)
                 }
             }
+
+            HStack(spacing: 6) {
+                highlightSectionTitle("포스터 레이아웃")
+                proBadge
+                if ProFeatureGate.isUnlocked && !layoutStore.layout(for: posterFormat).isDefault {
+                    Text("커스텀 적용중")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundStyle(RunStampColors.energyOrange)
+                }
+            }
+            layoutEditButton
+
+            HStack(spacing: 6) {
+                highlightSectionTitle("레이아웃 프리셋")
+                proBadge
+            }
+            presetRow
+
+            #if DEBUG
+            proDebugToggle
+            #endif
         }
         .padding(14)
         .background(RunStampColors.elevatedSurface.opacity(0.90))
@@ -206,6 +261,160 @@ struct RunDetailView: View {
             )
             .clipShape(Capsule())
     }
+
+    /// PRO: 포스터 섹션 자유 배치 편집 진입 버튼. 잠금 상태에서는 업그레이드 안내를 띄운다.
+    private var layoutEditButton: some View {
+        Button {
+            guard ProFeatureGate.isUnlocked else {
+                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                return
+            }
+            isLayoutEditorPresented = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: ProFeatureGate.isUnlocked ? "square.grid.3x1.below.line.grid.1x2" : "lock.fill")
+                    .font(.system(size: 12, weight: .black))
+                Text("배치·크기·숨김 편집")
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+            }
+            .foregroundStyle(RunStampColors.primaryText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(RunStampColors.surface)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(RunStampColors.cardStroke.opacity(0.65), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// PRO: 저장된 배치 프리셋 목록. 탭하면 적용, 길게 눌러 삭제한다.
+    private var presetRow: some View {
+        let presets = layoutStore.presets(for: posterFormat)
+        let currentLayout = layoutStore.layout(for: posterFormat)
+
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                savePresetChip(currentLayout: currentLayout)
+                defaultLayoutChip(isActive: currentLayout.isDefault)
+
+                ForEach(presets) { preset in
+                    presetChip(preset, isActive: !currentLayout.isDefault && preset.layout == currentLayout)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    /// 현재 배치를 이름 붙여 저장하는 진입 칩.
+    private func savePresetChip(currentLayout: PosterLayout) -> some View {
+        Button {
+            guard ProFeatureGate.isUnlocked else {
+                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                return
+            }
+            guard !currentLayout.isDefault else {
+                viewModel.exportMessage = "기본 배치 상태입니다. 먼저 레이아웃을 편집한 뒤 프리셋으로 저장해 주세요."
+                return
+            }
+            presetNameDraft = ""
+            isPresetSavePromptPresented = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: ProFeatureGate.isUnlocked ? "plus.circle.fill" : "lock.fill")
+                    .font(.system(size: 11, weight: .black))
+                    .foregroundStyle(RunStampColors.limeGreen)
+                Text("현재 배치 저장")
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(RunStampColors.primaryText)
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(RunStampColors.surface)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(RunStampColors.cardStroke.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 기본 배치로 되돌리는 칩. 프리셋을 쓰다가 원래 디자인으로 즉시 복귀할 수 있다.
+    private func defaultLayoutChip(isActive: Bool) -> some View {
+        Button {
+            guard ProFeatureGate.isUnlocked else {
+                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                layoutStore.setLayout(.default, for: posterFormat)
+            }
+        } label: {
+            presetChipLabel(name: "기본 배치", isActive: isActive)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func presetChip(_ preset: PosterLayoutPreset, isActive: Bool) -> some View {
+        Button {
+            guard ProFeatureGate.isUnlocked else {
+                viewModel.exportMessage = ProFeatureGate.layoutLockedMessage
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                layoutStore.applyPreset(preset, for: posterFormat)
+            }
+        } label: {
+            presetChipLabel(name: preset.name, isActive: isActive)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    layoutStore.deletePreset(preset, for: posterFormat)
+                }
+            } label: {
+                Label("프리셋 삭제", systemImage: "trash")
+            }
+        }
+    }
+
+    private func presetChipLabel(name: String, isActive: Bool) -> some View {
+        Text(name)
+            .font(.system(size: 12, weight: .black, design: .rounded))
+            .foregroundStyle(isActive ? RunStampColors.appBackground : RunStampColors.primaryText)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isActive ? RunStampColors.energyOrange : RunStampColors.surface)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(isActive ? .clear : RunStampColors.cardStroke.opacity(0.65), lineWidth: 1))
+    }
+
+    #if DEBUG
+    /// DEBUG 전용 잠금 토글. 실기기에서 락/언락 UI를 즉시 확인하기 위한 스위치이며,
+    /// RELEASE 빌드에는 컴파일되지 않는다. (실제 결제 흐름은 StoreKit 연동 시 대체)
+    private var proDebugToggle: some View {
+        Toggle(isOn: $proUnlockedDebug) {
+            HStack(spacing: 5) {
+                Image(systemName: proUnlockedDebug ? "lock.open.fill" : "lock.fill")
+                    .font(.system(size: 11, weight: .black))
+                Text("PRO 잠금 해제 · DEBUG 전용")
+                    .font(.system(size: 12, weight: .bold))
+            }
+            .foregroundStyle(RunStampColors.secondaryText)
+        }
+        .tint(RunStampColors.energyOrange)
+        .onChange(of: proUnlockedDebug) { _, isUnlocked in
+            // 잠금으로 되돌리면 이미 선택된 강조를 해제해 게이트와 상태를 일치시킨다.
+            if !isUnlocked {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    contentHighlight = nil
+                }
+            }
+        }
+    }
+    #endif
 
     private func contentHighlightChip(_ target: ContentHighlightTarget?) -> some View {
         let isSelected = contentHighlight == target
@@ -298,21 +507,18 @@ struct RunDetailView: View {
                     .minimumScaleFactor(0.7)
             }
 
-            TabView(selection: $posterTemplate) {
-                ForEach(PosterTemplate.allCases) { template in
-                    templatePage(template, report: report)
-                        .tag(template)
+            ScaledCanvasPreview(canvasSize: posterFormat.canvasSize) {
+                switch posterFormat {
+                case .feed:
+                    ZoneRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight, layout: activeLayout(for: .feed))
+                case .story:
+                    StoryRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight, layout: activeLayout(for: .story))
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(0.36), radius: 24, y: 10)
             .frame(height: previewHeight)
             .animation(.easeInOut(duration: 0.22), value: posterFormat)
-
-            HStack(spacing: 8) {
-                ForEach(PosterTemplate.allCases) { template in
-                    templateChip(template)
-                }
-            }
         }
         .padding(12)
         .background(RunStampColors.elevatedSurface.opacity(0.92))
@@ -320,56 +526,10 @@ struct RunDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(RunStampColors.cardStroke.opacity(0.45), lineWidth: 1))
     }
 
-    @ViewBuilder
-    private func templatePage(_ template: PosterTemplate, report: RunningPosterReport) -> some View {
-        Group {
-            switch template {
-            case .zone:
-                ScaledCanvasPreview(canvasSize: posterFormat.canvasSize) {
-                    switch posterFormat {
-                    case .feed:
-                        ZoneRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight)
-                    case .story:
-                        StoryRunPosterView(report: report, highlightStamp: selectedHighlightStamp(for: report), contentHighlight: contentHighlight)
-                    }
-                }
-            case .receipt:
-                ScaledCanvasPreview(canvasSize: ImageRendererService.storySize) {
-                    RunningReceiptView(workout: viewModel.workout)
-                }
-            case .route:
-                ScaledCanvasPreview(canvasSize: ImageRendererService.storySize) {
-                    RoutePosterView(workout: viewModel.workout)
-                }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: .black.opacity(0.36), radius: 24, y: 10)
-    }
-
     private var previewHeight: CGFloat {
         let availableWidth = max(UIScreen.main.bounds.width - 60, 300)
-        let canvas = posterTemplate.canvasSize(format: posterFormat)
+        let canvas = posterFormat.canvasSize
         return availableWidth * canvas.height / canvas.width
-    }
-
-    private func templateChip(_ template: PosterTemplate) -> some View {
-        let isSelected = posterTemplate == template
-        return Button {
-            withAnimation(.easeInOut(duration: 0.22)) {
-                posterTemplate = template
-            }
-        } label: {
-            Text(template.displayText)
-                .font(.system(size: 13, weight: .black, design: .rounded))
-                .foregroundStyle(isSelected ? RunStampColors.appBackground : RunStampColors.primaryText)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 9)
-                .background(isSelected ? RunStampColors.limeGreen : RunStampColors.surface)
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(isSelected ? .clear : RunStampColors.cardStroke.opacity(0.65), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
     }
 
     private var actionButtons: some View {
@@ -378,11 +538,11 @@ struct RunDetailView: View {
 
             HStack(spacing: 12) {
                 reportActionButton(title: "이미지로 저장", systemImage: "square.and.arrow.down", isPrimary: true) {
-                    viewModel.exportPoster(template: posterTemplate, format: posterFormat, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight)
+                    viewModel.exportPoster(format: posterFormat, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight, layout: activeLayout(for: posterFormat))
                 }
 
                 reportActionButton(title: "공유하기", systemImage: "square.and.arrow.up", isPrimary: false) {
-                    viewModel.prepareShareImage(template: posterTemplate, format: posterFormat, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight)
+                    viewModel.prepareShareImage(format: posterFormat, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight, layout: activeLayout(for: posterFormat))
                 }
             }
         }
@@ -390,7 +550,7 @@ struct RunDetailView: View {
 
     private var instagramStoryButton: some View {
         Button {
-            viewModel.shareToInstagramStories(template: posterTemplate, highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight)
+            viewModel.shareToInstagramStories(highlightStamp: currentHighlightStamp, contentHighlight: contentHighlight, layout: activeLayout(for: .story))
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "camera.circle.fill")

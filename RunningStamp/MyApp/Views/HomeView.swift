@@ -2,9 +2,11 @@ import SwiftUI
 
 struct HomeView: View {
     @StateObject private var viewModel = RunningPosterViewModel()
+    @ObservedObject private var autoPoster = AutoPosterService.shared
     @State private var navigationPath: [RunWorkoutSummary] = []
     @State private var selectedTransitionID: UUID?
     @State private var didStartAutoLoad = false
+    @State private var didReloadForPendingWorkout = false
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -57,6 +59,12 @@ struct HomeView: View {
             .task {
                 await autoLoadRunsIfNeeded()
             }
+            .onChange(of: autoPoster.pendingWorkoutID) { _, _ in
+                openPendingWorkoutIfPossible()
+            }
+            .onChange(of: viewModel.workouts) { _, _ in
+                openPendingWorkoutIfPossible()
+            }
         }
     }
 
@@ -64,6 +72,32 @@ struct HomeView: View {
         guard !didStartAutoLoad else { return }
         didStartAutoLoad = true
         await viewModel.requestAuthorizationAndLoadRuns()
+
+        // HealthKit 연동에 성공하면 러닝 종료 감지 + 포스터 준비 알림을 활성화한다.
+        if viewModel.permissionState == .authorized {
+            await autoPoster.enableIfNeeded()
+        }
+        openPendingWorkoutIfPossible()
+    }
+
+    /// 알림 탭으로 지정된 러닝이 목록에 있으면 상세로 바로 이동한다.
+    /// 아직 목록에 없으면 1회에 한해 새로고침을 시도한다(콜드 스타트 직후 대비).
+    private func openPendingWorkoutIfPossible() {
+        guard let pendingID = autoPoster.pendingWorkoutID else { return }
+
+        if let workout = viewModel.workouts.first(where: { $0.id == pendingID }) {
+            autoPoster.pendingWorkoutID = nil
+            didReloadForPendingWorkout = false
+            navigationPath = [workout]
+        } else if didStartAutoLoad && !viewModel.isLoadingRuns {
+            guard !didReloadForPendingWorkout else {
+                autoPoster.pendingWorkoutID = nil
+                didReloadForPendingWorkout = false
+                return
+            }
+            didReloadForPendingWorkout = true
+            Task { await viewModel.loadRecentRuns() }
+        }
     }
 
     private func startReportTransition(_ workout: RunWorkoutSummary) {

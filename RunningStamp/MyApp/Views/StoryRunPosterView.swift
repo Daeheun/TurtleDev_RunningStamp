@@ -33,6 +33,8 @@ struct StoryRunPosterView: View {
     let report: RunningPosterReport
     var highlightStamp: HighlightStamp = .clean
     var contentHighlight: ContentHighlightTarget?
+    /// PRO: 섹션 커스텀 배치. 기본값이면 기존 렌더링과 동일하다.
+    var layout: PosterLayout = .default
 
     private var resolvedHighlight: HighlightStamp {
         highlightStamp.resolved(for: report)
@@ -47,31 +49,42 @@ struct StoryRunPosterView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             background
 
-            VStack(alignment: .leading, spacing: 30) {
-                topBar
-
-                heroBlock
-
-                statsRow
-
-                primaryVisual
-                    .frame(height: 560)
-
-                zoneBarCard
-
-                Spacer(minLength: 0)
-
-                footer
+            // 섹션은 저장된 순서대로 플로우 레이아웃이 자동 배치한다.
+            // 이동·숨김·크기 변경 시 나머지 섹션이 iOS 홈 화면처럼 재배치된다.
+            PosterFlowLayout(spacing: 30) {
+                ForEach(layout.visibleSections(for: .story)) { section in
+                    storySection(section)
+                        .posterSection(section, layout: layout, format: .story)
+                }
             }
             .padding(.horizontal, 56)
             .padding(.top, 190)
-            .padding(.bottom, 200)
         }
         .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
         .foregroundStyle(RunStampColors.primaryText)
+    }
+
+    @ViewBuilder
+    private func storySection(_ section: PosterSection) -> some View {
+        switch section {
+        case .topBar:
+            topBar
+        case .hero:
+            heroBlock
+        case .stats:
+            statsRow
+        case .visual:
+            primaryVisual
+        case .zoneBar:
+            zoneBarCard
+        case .footer:
+            footer
+        default:
+            EmptyView()
+        }
     }
 
     private var background: some View {

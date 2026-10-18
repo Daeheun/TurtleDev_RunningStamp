@@ -24,10 +24,32 @@ enum ContentHighlightTarget: String, CaseIterable, Identifiable {
 }
 
 /// PRO 기능 잠금 게이트.
-/// TODO: StoreKit 구독/구매 연동 시 실제 구매 상태로 교체한다.
+/// DEBUG 빌드에서는 UserDefaults 토글로 락/언락을 실기기에서 즉시 전환할 수 있다(재빌드 불필요).
+/// RELEASE 빌드에서는 기존 동작(해제)을 유지한다.
+/// TODO: StoreKit 구독/구매 연동 시 `isUnlocked`을 실제 구매 상태로 교체한다.
 enum ProFeatureGate {
-    static let isUnlocked = true
+    /// DEBUG 잠금 토글과 공유하는 UserDefaults 키.
+    static let unlockedDefaultsKey = "pro_feature_unlocked"
+
+    /// 최초 실행 시 기본값(기존 동작 유지: 해제 상태).
+    static let defaultUnlocked = true
+
+    /// PRO 잠금 해제 여부.
+    static var isUnlocked: Bool {
+        #if DEBUG
+        let defaults = UserDefaults.standard
+        // 토글을 한 번도 건드리지 않았으면 기본값 사용.
+        guard defaults.object(forKey: unlockedDefaultsKey) != nil else {
+            return defaultUnlocked
+        }
+        return defaults.bool(forKey: unlockedDefaultsKey)
+        #else
+        return defaultUnlocked
+        #endif
+    }
+
     static let lockedMessage = "콘텐츠 강조는 PRO 기능입니다. 업그레이드 후 이용할 수 있습니다."
+    static let layoutLockedMessage = "포스터 레이아웃 커스텀은 PRO 기능입니다. 업그레이드 후 이용할 수 있습니다."
 }
 
 /// 선택한 콘텐츠 주위에 불꽃(FireCorner 에셋) 장식과 열기 글로우를 두른다.
